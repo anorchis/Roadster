@@ -78,7 +78,7 @@
   const ROLL_RATE = 110, PITCH_RATE = 55, YAW_RATE = 35; // °/s
   const F = {
     pos: new THREE.Vector3(), prevPos: new THREE.Vector3(), quat: new THREE.Quaternion(),
-    speed: 60, sinkV: 0, throttle: 0.4, boost: 0,
+    speed: 60, sinkV: 0, throttle: 0.4, boost: 0, ground: false, driveHeading: 0,
     roll: 0, pitch: 0, heading: 0, dRoll: 0, dPitch: 0, dYaw: 0,
   };
   const cmd = { roll: 0, pitch: 0, yaw: 0 };
@@ -99,7 +99,7 @@
     F.pos.set(s.x, s.y, s.z);
     F.prevPos.copy(F.pos);
     F.quat.setFromAxisAngle(AX.y, -s.heading * DEG);
-    F.speed = 70; F.sinkV = 0; F.throttle = 0.45; F.boost = 0;
+    F.speed = 70; F.sinkV = 0; F.throttle = 0.45; F.boost = 0; F.ground = false;
     cmd.roll = cmd.pitch = cmd.yaw = 0;
     fwdSmooth.set(0, 0, -1).applyQuaternion(F.quat);
     roadster.root.visible = true;
@@ -137,8 +137,8 @@
     for (const off of [0, 2.0, -2.0]) {
       probe.copy(F.pos).addScaledVector(fwd, off);
       const h = GEO.height(probe.x, probe.z);
-      if (h < 0 && probe.y < 0.4) return '바다에 빠졌어요';
-      if (h >= 0 && probe.y < h + 0.5) return '땅(산)에 부딪혔어요';
+      if (h < 0 && probe.y < 0.4) return F.ground ? '물에 빠졌어요 (자동차는 바다·강을 달릴 수 없어요)' : '바다에 빠졌어요';
+      if (!F.ground && h >= 0 && probe.y < h + 0.5) return '땅에 거꾸로 부딪혔어요 (바퀴가 아래로 오게 내려앉아야 해요)';
       const hit = Colliders.test(probe, 0.9);
       if (hit) return `${hit}에 부딪혔어요`;
     }
@@ -191,6 +191,8 @@
     const boosting = keys.has('Space') || touch.boost;
     F.boost += ((boosting ? 1 : 0) - F.boost) * (1 - Math.exp(-6 * dt));
 
+    if (F.ground) { drive(dt); return; }
+
     // 조종 입력에 따른 회전 (기체 기준 축)
     F.dRoll = cmd.roll * ROLL_RATE * dt;
     F.dPitch = cmd.pitch * PITCH_RATE * dt;
@@ -233,6 +235,84 @@
     F.pos.addScaledVector(fwd, F.speed * dt);
     F.pos.y += F.sinkV * dt;
     if (F.pos.y > 1500) { F.pos.y = 1500; F.sinkV = Math.min(F.sinkV, 0); }
+    touchdown();
+
+    roadster.root.position.copy(F.pos);
+    roadster.root.quaternion.copy(F.quat);
+    roadster.update(dt, cmd, F.speed, F.boost);
+  }
+
+  // ---------- 땅에 내려앉기 / 자동차 주행 ----------
+  // 바퀴가 아래를 향한 채 땅에 닿으면 착지해서 자동차처럼 달림 (뒤집히거나 거꾸로 꽂히면 충돌)
+  const TAKEOFF_SPEED = 120 / 3.6;
+  const groundN = new THREE.Vector3(), qGround = new THREE.Quaternion();
+  function groundNormal(x, z) {
+    const hx = GEO.height(x + 1, z) - GEO.height(x - 1, z);
+    const hz = GEO.height(x, z + 1) - GEO.height(x, z - 1);
+    return groundN.set(-hx / 2, 1, -hz / 2).normalize();
+  }
+  function touchdown() {
+    let contact = false;
+    for (const off of [0, 2.0, -2.0]) {
+      probe.copy(F.pos).addScaledVector(fwd, off);
+      const h = GEO.height(probe.x, probe.z);
+      if (h >= 0 && probe.y < h + 0.5) contact = true;
+    }
+    if (!contact || upv.y < 0.5 || F.pitch < -40) return;
+    if (GEO.height(F.pos.x, F.pos.z) < 0) return;
+    F.ground = true;
+    F.driveHeading = F.heading;
+    F.sinkV = 0;
+    F.pos.y = GEO.height(F.pos.x, F.pos.z) + 0.5;
+    F.speed = Math.min(F.speed, 70);
+    toast('🚗 착지! 이제 땅 위를 달려요<br><small>W(피치 +)를 누르면 120km/h 이상에서 다시 이륙</small>', 2600);
+  }
+
+  function drive(dt) {
+    // 자동차 핸들 = 요(Yaw): A/D 또는 Q/E 로 방향을 돌림
+    const steer = raw.yaw !== 0 ? raw.yaw : raw.roll;
+    raw.roll = 0; raw.yaw = steer;
+    cmd.roll += (0 - cmd.roll) * (1 - Math.exp(-7 * dt));
+    const braking = raw.pitch < 0;
+
+    const turnRate = 55 * Math.min(1, F.speed / 8) / (1 + F.speed / 60);
+    F.dYaw = steer * turnRate * dt;
+    F.dRoll = 0; F.dPitch = 0;
+    F.driveHeading = (F.driveHeading + F.dYaw + 360) % 360;
+
+    // 속도: 스로틀로 가속, S(피치 −)는 브레이크, 오르막은 느려짐
+    const target = braking ? 0 : 8 + F.throttle * 52 + F.boost * 60;
+    const acc = braking ? -25 : target > F.speed ? 9 + F.boost * 22 : -5;
+    F.speed += acc * dt * Math.min(1, Math.abs(target - F.speed) / 3 + (braking ? 1 : 0));
+
+    const n = groundNormal(F.pos.x, F.pos.z);
+    qGround.setFromUnitVectors(AX.y, n).multiply(qTmp.setFromAxisAngle(AX.y, -F.driveHeading * DEG));
+    F.quat.slerp(qGround, 1 - Math.exp(-12 * dt));
+    fwd.set(0, 0, -1).applyQuaternion(qGround);
+    F.speed -= 9.8 * fwd.y * dt;
+    F.speed = THREE.MathUtils.clamp(F.speed, 0, 130);
+
+    F.prevPos.copy(F.pos);
+    F.pos.x += fwd.x * F.speed * dt;
+    F.pos.z += fwd.z * F.speed * dt;
+    const h = GEO.height(F.pos.x, F.pos.z);
+    F.pos.y = Math.max(h, -0.5) + 0.5;
+
+    fwd.set(0, 0, -1).applyQuaternion(F.quat);
+    upv.set(0, 1, 0).applyQuaternion(F.quat);
+    right.set(1, 0, 0).applyQuaternion(F.quat);
+    F.pitch = Math.asin(THREE.MathUtils.clamp(fwd.y, -1, 1)) / DEG;
+    F.roll = Math.atan2(-right.y, upv.y) / DEG;
+    F.heading = F.driveHeading;
+
+    // 이륙: 충분히 빠를 때 W(피치 +)로 앞코를 들어 올림
+    if (raw.pitch > 0 && F.speed >= TAKEOFF_SPEED) {
+      F.ground = false;
+      F.quat.multiply(qTmp.setFromAxisAngle(AX.x, 8 * DEG));
+      F.pos.y += 0.6;
+      F.sinkV = 3;
+      toast('✈️ 이륙!', 1400);
+    }
 
     roadster.root.position.copy(F.pos);
     roadster.root.quaternion.copy(F.quat);
@@ -293,7 +373,12 @@
       if (v > 0) now.push(`<span class="now-${a}">${NAMES[a].plus}</span>`);
       if (v < 0) now.push(`<span class="now-${a}">${NAMES[a].minus}</span>`);
     }
-    $('nowInput').innerHTML = now.length ? '지금 누른 것: ' + now.join(' ') : '<span class="dim">키를 누르면 여기에 표시돼요</span>';
+    const idleText = F.ground
+      ? '🚗 주행 중 · 핸들은 요(A/D, Q/E) · R 가속 · S 브레이크 · W 이륙 (120km/h 이상)'
+      : '키를 누르면 여기에 표시돼요';
+    $('nowInput').innerHTML = now.length ? (F.ground ? '🚗 ' : '') + '지금 누른 것: ' + now.join(' ') : `<span class="dim">${idleText}</span>`;
+    $('modeBadge').textContent = F.ground ? '🚗 주행 모드' : '✈️ 비행 모드';
+    $('modeBadge').classList.toggle('drive', F.ground);
     $('nowInput').classList.toggle('show', now.length > 0);
 
     const r = F.roll, p = F.pitch, h = F.heading;
@@ -317,6 +402,7 @@
     const out = F.pos.x < b.minX || F.pos.x > b.maxX || F.pos.z < b.minZ || F.pos.z > b.maxZ;
     let warn = '';
     if (out) warn = '포항 지도 밖이에요! 돌아가세요';
+    else if (F.ground) warn = raw.pitch > 0 && F.speed < TAKEOFF_SPEED ? `이륙하려면 120km/h 이상! (지금 ${Math.round(F.speed * 3.6)}km/h · R로 가속)` : '';
     else if (F.speed < 30) warn = '너무 느려요! 실속 — R키 또는 스페이스로 속도를 올려요';
     else if (F.pos.y - ground < 25 && F.sinkV < -3) warn = '고도가 낮아요! 기수를 올려요 (W)';
     $('warn').textContent = warn;
