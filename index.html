@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>로드스터 포항 비행</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="game"></div>
+
+<!-- ===== 게임 화면 표시 ===== -->
+<div id="hud">
+  <div id="missionPanel">
+    <div class="m-head"><span id="mStep">미션 1</span><button id="menuBtn" title="일시정지 (P)">⏸</button></div>
+    <h2 id="mTitle"></h2>
+    <p id="mDesc"></p>
+    <div id="mKeys"></div>
+    <div class="bar"><div id="mBar"></div></div>
+    <div id="mStatus"></div>
+  </div>
+
+  <div id="flight">
+    <div class="gauge"><div class="g-label">속도</div><div class="g-val"><span id="spd">0</span><small>km/h</small></div></div>
+    <div class="gauge"><div class="g-label">고도 (해수면)</div><div class="g-val"><span id="alt">0</span><small>m</small></div></div>
+    <div class="gauge"><div class="g-label">지면까지</div><div class="g-val"><span id="agl">0</span><small>m</small></div></div>
+    <div class="thr">
+      <div class="thr-track"><div id="thrBar"></div></div>
+      <div class="thr-label">스로틀<br><kbd>R</kbd>▲ <kbd>F</kbd>▼</div>
+    </div>
+    <div id="boostLamp">SpaceX 스러스터<br><kbd>Space</kbd></div>
+    <div class="crashes">충돌 <b id="crashCount">0</b>회</div>
+  </div>
+
+  <div id="mapWrap"><canvas id="minimap" width="220" height="220"></canvas></div>
+  <div id="topBtns">
+    <button id="camBtn" title="카메라 (C)">🎥 <span id="camName"></span></button>
+    <button id="muteBtn" title="소리 (M)">🔊</button>
+  </div>
+
+  <div id="target"><div id="targetArrow">▲</div><div id="targetRing"></div><div id="targetText"></div></div>
+  <div id="warn"></div>
+  <div id="toast"></div>
+  <div id="crash"></div>
+
+  <div id="nowInput"></div>
+
+  <!-- 롤 / 피치 / 요 표시판 (터치로도 조종 가능) -->
+  <div id="axes">
+    <div class="axis" data-axis="roll">
+      <div class="axis-head"><b>롤</b> Roll <small>앞뒤 축으로 기울기</small></div>
+      <div class="axis-body">
+        <button class="lamp minus" data-ax="roll" data-dir="-1"><kbd>A ←</kbd><b>롤 −</b><small>왼쪽으로</small></button>
+        <svg viewBox="0 0 100 100" class="mini">
+          <line x1="0" y1="55" x2="100" y2="55" class="horizon"/>
+          <g id="rollCar">
+            <!-- 뒤에서 본 로드스터 -->
+            <path d="M18 62 Q18 47 30 45 L36 37 Q50 31 64 37 L70 45 Q82 47 82 62 Z" class="car-body"/>
+            <path d="M38 44 L42 38 Q50 35 58 38 L62 44 Z" class="car-glass"/>
+            <rect x="26" y="50" width="48" height="2.5" class="car-tail"/>
+            <rect x="22" y="40" width="56" height="2" rx="1" class="car-wing"/>
+            <rect x="19" y="60" width="9" height="9" rx="2" class="car-tire"/>
+            <rect x="72" y="60" width="9" height="9" rx="2" class="car-tire"/>
+          </g>
+          <text x="50" y="96" class="mini-cap">뒤에서 본 모습</text>
+        </svg>
+        <button class="lamp plus" data-ax="roll" data-dir="1"><kbd>D →</kbd><b>롤 +</b><small>오른쪽으로</small></button>
+      </div>
+      <div class="axis-val" id="val-roll">0°</div>
+    </div>
+
+    <div class="axis" data-axis="pitch">
+      <div class="axis-head"><b>피치</b> Pitch <small>좌우 축으로 앞코 들기</small></div>
+      <div class="axis-body">
+        <button class="lamp minus" data-ax="pitch" data-dir="-1"><kbd>S ↓</kbd><b>피치 −</b><small>기수 내리기</small></button>
+        <svg viewBox="0 0 100 100" class="mini">
+          <line x1="0" y1="55" x2="100" y2="55" class="horizon"/>
+          <g id="pitchCar">
+            <!-- 옆에서 본 로드스터 (오른쪽이 앞) -->
+            <path d="M12 60 L12 52 Q14 48 24 47 L40 42 Q52 38 62 44 Q76 46 88 52 L90 58 L88 60 Z" class="car-body"/>
+            <path d="M42 43 Q52 39 60 44 L46 46 Z" class="car-glass"/>
+            <rect x="10" y="42" width="12" height="2" class="car-wing"/>
+            <circle cx="28" cy="61" r="6" class="car-tire"/>
+            <circle cx="74" cy="61" r="6" class="car-tire"/>
+          </g>
+          <text x="50" y="96" class="mini-cap">옆에서 본 모습 →앞</text>
+        </svg>
+        <button class="lamp plus" data-ax="pitch" data-dir="1"><kbd>W ↑</kbd><b>피치 +</b><small>기수 올리기</small></button>
+      </div>
+      <div class="axis-val" id="val-pitch">0°</div>
+    </div>
+
+    <div class="axis" data-axis="yaw">
+      <div class="axis-head"><b>요</b> Yaw <small>위아래 축으로 방향 돌리기</small></div>
+      <div class="axis-body">
+        <button class="lamp minus" data-ax="yaw" data-dir="-1"><kbd>Q</kbd><b>요 −</b><small>왼쪽으로</small></button>
+        <svg viewBox="0 0 100 100" class="mini">
+          <circle cx="50" cy="50" r="40" class="dial"/>
+          <text x="50" y="16" class="dir n">북</text><text x="88" y="53" class="dir">동</text>
+          <text x="50" y="92" class="dir">남</text><text x="12" y="53" class="dir">서</text>
+          <g id="yawCar">
+            <!-- 위에서 본 로드스터 (위쪽이 앞) -->
+            <path d="M50 22 Q60 24 61 34 L62 66 Q62 76 50 77 Q38 76 38 66 L39 34 Q40 24 50 22 Z" class="car-body"/>
+            <path d="M44 42 Q50 38 56 42 L55 56 L45 56 Z" class="car-glass"/>
+            <rect x="38" y="70" width="24" height="2.5" class="car-wing"/>
+          </g>
+        </svg>
+        <button class="lamp plus" data-ax="yaw" data-dir="1"><kbd>E</kbd><b>요 +</b><small>오른쪽으로</small></button>
+      </div>
+      <div class="axis-val" id="val-yaw">000°</div>
+    </div>
+  </div>
+
+  <div id="touchExtra">
+    <button data-btn="thrUp">가속 ▲</button>
+    <button data-btn="thrDown">감속 ▼</button>
+    <button data-btn="boost" class="boost">🚀 부스트</button>
+  </div>
+
+  <div id="help">
+    <h3>조작법</h3>
+    <p><kbd>W</kbd>/<kbd>↑</kbd> 피치+ · <kbd>S</kbd>/<kbd>↓</kbd> 피치− · <kbd>D</kbd>/<kbd>→</kbd> 롤+ · <kbd>A</kbd>/<kbd>←</kbd> 롤− · <kbd>E</kbd> 요+ · <kbd>Q</kbd> 요−</p>
+    <p><kbd>R</kbd>/<kbd>F</kbd> 스로틀 · <kbd>Space</kbd> 스러스터 · <kbd>C</kbd> 카메라 · <kbd>G</kbd> 회전축 화살표 · <kbd>N</kbd> 다음 미션 · <kbd>P</kbd> 일시정지 · <kbd>M</kbd> 소리</p>
+  </div>
+
+  <div id="pause">
+    <div class="panel">
+      <h2>일시정지</h2>
+      <button id="resumeBtn">계속하기</button>
+      <button id="restartBtn">이 미션 다시 하기</button>
+      <button id="toMenuBtn">처음 화면으로</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 시작 화면 ===== -->
+<div id="start">
+  <div class="start-card">
+    <div class="brand">TESLA ROADSTER · POHANG</div>
+    <h1>로드스터 타고 포항 하늘 날기</h1>
+    <p class="lead">2026년 10월 공개된 신형 테슬라 로드스터(SpaceX 스러스터 탑재)를 타고 포항시 위를 날며
+      비행기를 움직이는 세 가지 회전, <b>롤 · 피치 · 요</b>를 배워요!</p>
+
+    <div class="concepts">
+      <div class="concept roll">
+        <svg viewBox="0 0 120 80"><ellipse cx="60" cy="42" rx="44" ry="12" class="c-body"/><line x1="4" y1="42" x2="116" y2="42" class="c-axis"/>
+          <path d="M60 14 A28 28 0 0 1 88 42" class="c-arrow"/><polygon points="88,42 82,34 93,35" class="c-head"/></svg>
+        <h3>롤 Roll</h3><p>앞뒤로 꿰뚫은 축을 중심으로 <b>좌우로 기울이기</b><br><kbd>A</kbd> 왼쪽 · <kbd>D</kbd> 오른쪽</p>
+      </div>
+      <div class="concept pitch">
+        <svg viewBox="0 0 120 80"><path d="M14 50 L22 40 Q60 30 104 44 L106 52 Z" class="c-body"/><circle cx="60" cy="44" r="3" class="c-dot"/>
+          <path d="M30 22 A34 34 0 0 1 92 22" class="c-arrow"/><polygon points="92,22 82,18 88,29" class="c-head"/></svg>
+        <h3>피치 Pitch</h3><p>좌우로 꿰뚫은 축을 중심으로 <b>앞코를 들고 숙이기</b><br><kbd>W</kbd> 올리기 · <kbd>S</kbd> 내리기</p>
+      </div>
+      <div class="concept yaw">
+        <svg viewBox="0 0 120 80"><path d="M60 10 Q72 12 72 24 L72 60 Q72 70 60 70 Q48 70 48 60 L48 24 Q48 12 60 10 Z" class="c-body"/><circle cx="60" cy="40" r="3" class="c-dot"/>
+          <path d="M28 40 A32 32 0 0 1 60 8" class="c-arrow" transform="rotate(20 60 40)"/></svg>
+        <h3>요 Yaw</h3><p>위아래로 꿰뚫은 축을 중심으로 <b>방향을 좌우로 돌리기</b><br><kbd>Q</kbd> 왼쪽 · <kbd>E</kbd> 오른쪽</p>
+      </div>
+    </div>
+
+    <div class="controls">
+      <span><kbd>R</kbd>/<kbd>F</kbd> 속도 올리기/내리기</span>
+      <span><kbd>Space</kbd> SpaceX 스러스터 부스트</span>
+      <span><kbd>C</kbd> 카메라 바꾸기</span>
+      <span><kbd>P</kbd> 일시정지</span>
+      <span>화면의 롤·피치·요 버튼을 터치해도 조종돼요</span>
+      <span class="hl">💥 어디든 부딪히면 처음 위치로 초기화!</span>
+    </div>
+
+    <button id="startBtn">비행 시작! ▶</button>
+    <div class="ml-title">미션 골라서 시작하기</div>
+    <div id="missionList"></div>
+    <p class="note">로드스터는 공개된 디자인 특징(Ano White 도장, 골드 틴트 유리, 숨은 헤드라이트, 차폭 전체 테일라이트,
+      능동형 리어윙, 스러스터 노즐 4개)을 바탕으로 만든 근사 모델이에요. 포항 지도는 실제 위치를 바탕으로 하되 거리를 0.35배로 줄였어요.</p>
+  </div>
+</div>
+
+<script src="lib/three.min.js"></script>
+<script src="js/geo.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/world.js"></script>
+<script src="js/roadster.js"></script>
+<script src="js/missions.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
