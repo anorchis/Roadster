@@ -138,7 +138,6 @@
       probe.copy(F.pos).addScaledVector(fwd, off);
       const h = GEO.height(probe.x, probe.z);
       if (h < 0 && probe.y < 0.4) return F.ground ? '물에 빠졌어요 (자동차는 바다·강을 달릴 수 없어요)' : '바다에 빠졌어요';
-      if (!F.ground && h >= 0 && probe.y < h + 0.5) return '땅에 거꾸로 부딪혔어요 (바퀴가 아래로 오게 내려앉아야 해요)';
       const hit = Colliders.test(probe, 0.9);
       if (hit) return `${hit}에 부딪혔어요`;
     }
@@ -243,7 +242,7 @@
   }
 
   // ---------- 땅에 내려앉기 / 자동차 주행 ----------
-  // 바퀴가 아래를 향한 채 땅에 닿으면 착지해서 자동차처럼 달림 (뒤집히거나 거꾸로 꽂히면 충돌)
+  // 땅에 닿으면 어떤 자세였든 바퀴로 착지해서 자동차처럼 달림 (물에 빠지거나 건물에 부딪힐 때만 충돌)
   const TAKEOFF_SPEED = 120 / 3.6;
   const groundN = new THREE.Vector3(), qGround = new THREE.Quaternion();
   function groundNormal(x, z) {
@@ -252,20 +251,22 @@
     return groundN.set(-hx / 2, 1, -hz / 2).normalize();
   }
   function touchdown() {
-    let contact = false;
+    let land = null;
     for (const off of [0, 2.0, -2.0]) {
       probe.copy(F.pos).addScaledVector(fwd, off);
       const h = GEO.height(probe.x, probe.z);
-      if (h >= 0 && probe.y < h + 0.5) contact = true;
+      if (h >= 0 && probe.y < h + 0.5) { land = probe.clone(); break; }
     }
-    if (!contact || upv.y < 0.5 || F.pitch < -40) return;
-    if (GEO.height(F.pos.x, F.pos.z) < 0) return;
+    if (!land) return;
+    // 차 한가운데가 물 위라면 땅에 닿은 앞/뒤 끝 쪽으로 옮겨서 착지
+    if (GEO.height(F.pos.x, F.pos.z) < 0) { F.pos.x = land.x; F.pos.z = land.z; }
+    const flipped = upv.y < 0.5;
     F.ground = true;
     F.driveHeading = F.heading;
     F.sinkV = 0;
     F.pos.y = GEO.height(F.pos.x, F.pos.z) + 0.5;
     F.speed = Math.min(F.speed, 70);
-    toast('🚗 착지! 이제 땅 위를 달려요<br><small>W(피치 +)를 누르면 120km/h 이상에서 다시 이륙</small>', 2600);
+    toast((flipped ? '🤸 빙글! 바퀴로 착지했어요!' : '🚗 착지! 이제 땅 위를 달려요') + '<br><small>W(피치 +)를 누르면 120km/h 이상에서 다시 이륙</small>', 2600);
   }
 
   function drive(dt) {
